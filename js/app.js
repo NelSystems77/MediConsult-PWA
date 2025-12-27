@@ -7,8 +7,10 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, // <--- NUEVO PARA REGISTRO
     signOut, 
-    onAuthStateChanged 
+    onAuthStateChanged,
+    deleteUser // <--- NUEVO PARA SEGURIDAD
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 // --- DATOS Y ESTADO ---
@@ -29,12 +31,13 @@ const categories = [
 let currentUserRole = 'user'; // user, regente, admin
 let currentCategory = null;
 let localItems = []; 
+let isRegistering = false; // Estado para saber si es Login o Registro
 
 // --- INICIALIZACIÓN ---
 document.addEventListener('DOMContentLoaded', () => {
     renderDashboard();
     setupEventListeners();
-    monitorAuthState(); // Iniciamos el monitor de sesión
+    monitorAuthState(); 
     registerServiceWorker();
 });
 
@@ -44,11 +47,13 @@ function setupEventListeners() {
     document.getElementById('searchInput').addEventListener('keyup', globalSearch);
     document.getElementById('backBtn').addEventListener('click', showDashboard);
     document.getElementById('addFab').addEventListener('click', () => openEditModal());
-    document.getElementById('btnLoginAction').addEventListener('click', login);
-    document.getElementById('btnLogoutAction').addEventListener('click', logout);
-    document.getElementById('btnSaveItem').addEventListener('click', saveItem);
     
-    // Listener para guardar usuario desde el panel de admin
+    // Auth Listeners Actualizados
+    document.getElementById('btnLoginAction').addEventListener('click', handleAuthAction);
+    document.getElementById('btnLogoutAction').addEventListener('click', logout);
+    document.getElementById('toggleRegister').addEventListener('click', toggleAuthMode);
+    
+    document.getElementById('btnSaveItem').addEventListener('click', saveItem);
     document.getElementById('btnSaveUser').addEventListener('click', saveUserPermission);
 
     document.querySelectorAll('.modal-close').forEach(btn => {
@@ -56,13 +61,89 @@ function setupEventListeners() {
     });
 }
 
-// --- AUTENTICACIÓN Y SEGURIDAD REAL ---
+// --- LÓGICA DE REGISTRO / LOGIN (NUEVO) ---
 
-// 1. Monitorear estado y verificar permisos en BD
+function toggleAuthMode(e) {
+    if(e) e.preventDefault();
+    isRegistering = !isRegistering;
+    
+    const title = document.getElementById('formTitle');
+    const btn = document.getElementById('btnLoginAction');
+    const msgToggle = document.getElementById('msgToggle');
+    const linkToggle = document.getElementById('toggleRegister');
+    
+    if (isRegistering) {
+        title.innerText = "Crear Cuenta Nueva";
+        btn.innerText = "Registrarme y Entrar";
+        msgToggle.innerText = "¿Ya tienes cuenta?";
+        linkToggle.innerText = "Inicia Sesión";
+    } else {
+        title.innerText = "Acceso Seguro";
+        btn.innerText = "Entrar";
+        msgToggle.innerText = "¿Es tu primera vez?";
+        linkToggle.innerText = "Crear mi clave";
+    }
+}
+
+function handleAuthAction() {
+    if (isRegistering) {
+        registerUser();
+    } else {
+        login();
+    }
+}
+
+async function registerUser() {
+    const email = document.getElementById('loginEmail').value;
+    const pass = document.getElementById('loginPassword').value;
+
+    if(!email || !pass) return showToast("Faltan datos");
+    if(pass.length < 6) return showToast("La contraseña debe tener 6 caracteres o más");
+
+    const btn = document.getElementById('btnLoginAction');
+    btn.innerText = "Verificando...";
+    btn.disabled = true;
+
+    try {
+        // 1. Crear usuario en Auth
+        const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+        const user = userCredential.user;
+
+        // 2. Verificar si está en lista blanca
+        const userRef = doc(db, "usuarios_permitidos", user.email);
+        const userSnap = await getDoc(userRef);
+
+        if (userSnap.exists()) {
+            showToast("¡Cuenta creada con éxito!");
+            // monitorAuthState hará el login automático
+            closeModal('loginModal');
+        } else {
+            // INTRUSO: Borrar cuenta y bloquear
+            await deleteUser(user);
+            alert("Tu correo no ha sido autorizado por el Administrador. Solicita acceso primero.");
+            location.reload(); 
+        }
+
+    } catch (error) {
+        console.error(error);
+        if (error.code === 'auth/email-already-in-use') {
+            showToast("Este correo ya existe. Inicia sesión.");
+            isRegistering = true; // Forzar estado para que el toggle funcione bien
+            toggleAuthMode(); // Volver a login
+        } else {
+            showToast("Error: " + error.message);
+        }
+    } finally {
+        btn.innerText = isRegistering ? "Registrarme y Entrar" : "Entrar";
+        btn.disabled = false;
+    }
+}
+
+// --- AUTENTICACIÓN EXISTENTE ---
+
 function monitorAuthState() {
     onAuthStateChanged(auth, async (user) => {
         if (user) {
-            // Usuario logueado en Firebase, ahora verificamos permisos en Firestore
             try {
                 const userRef = doc(db, "usuarios_permitidos", user.email);
                 const userSnap = await getDoc(userRef);
@@ -70,29 +151,29 @@ function monitorAuthState() {
                 if (userSnap.exists()) {
                     const data = userSnap.data();
                     
-                    // A. Verificar si está activo manualmente
                     if (!data.activo) {
-                        alert("Tu usuario ha sido desactivado por el administrador.");
+                        alert("Tu usuario ha sido desactivado.");
                         logout();
                         return;
                     }
 
-                    // B. Verificar fecha de vencimiento
                     const today = new Date().toISOString().split('T')[0];
                     if (data.vencimiento < today) {
-                        alert(`Tu acceso venció el día ${data.vencimiento}. Contacta al administrador.`);
+                        alert(`Tu acceso venció el ${data.vencimiento}.`);
                         logout();
                         return;
                     }
 
-                    // C. Asignar rol real (Normalizado a minúsculas para evitar errores)
                     currentUserRole = data.rol.toLowerCase().trim();
                     console.log(`Logueado como: ${currentUserRole}`);
                     updateUILoginState(true);
 
                 } else {
-                    // Usuario autenticado en Firebase pero NO está en la lista blanca
-                    alert("No tienes permisos asignados en este sistema.");
+                    // Si llegamos aquí es porque alguien se registró y se le borró la cuenta,
+                    // o intentó entrar y no está en lista.
+                    // (El registerUser ya maneja la eliminación, pero esto es doble seguridad)
+                    if(auth.currentUser) await deleteUser(auth.currentUser).catch(e => console.log(e));
+                    alert("No tienes permisos.");
                     logout(); 
                 }
             } catch (error) {
@@ -100,14 +181,12 @@ function monitorAuthState() {
                 logout();
             }
         } else {
-            // Usuario desconectado
             currentUserRole = 'user';
             updateUILoginState(false);
         }
     });
 }
 
-// 2. Iniciar Sesión
 async function login() {
     const email = document.getElementById('loginEmail').value;
     const pass = document.getElementById('loginPassword').value;
@@ -123,7 +202,7 @@ async function login() {
         closeModal('loginModal');
     } catch (error) {
         console.error(error);
-        if(error.code === 'auth/invalid-credential') showToast("Correo o contraseña incorrectos");
+        if(error.code === 'auth/invalid-credential') showToast("Datos incorrectos");
         else showToast("Error de acceso");
     } finally {
         document.getElementById('btnLoginAction').innerText = "Entrar";
@@ -131,16 +210,20 @@ async function login() {
     }
 }
 
-// 3. Cerrar Sesión
 async function logout() {
     try {
         await signOut(auth);
         showToast("Sesión cerrada");
         closeModal('loginModal');
-        // Ocultar panel de admin si estaba abierto
         const adminPanel = document.getElementById('adminPanel');
         adminPanel.classList.add('hidden');
         adminPanel.style.display = 'none';
+        
+        // Resetear formulario a modo Login
+        if(isRegistering) {
+            isRegistering = true; 
+            toggleAuthMode();
+        }
         
         showDashboard();
     } catch (error) {
@@ -148,21 +231,16 @@ async function logout() {
     }
 }
 
-// 4. Actualizar Interfaz según estado
 function updateUILoginState(isLoggedIn) {
     const loginBtn = document.getElementById('loginBtn');
     if (isLoggedIn) {
         loginBtn.style.color = 'var(--success)';
         loginBtn.innerHTML = '<i class="fas fa-user-check"></i>';
-        
-        // Si estamos viendo una lista, refrescar para mostrar botones de editar
         if(currentCategory) openCategory(currentCategory);
     } else {
         loginBtn.style.color = 'white';
         loginBtn.innerHTML = '<i class="fas fa-user-lock"></i>';
         document.getElementById('addFab').style.display = 'none';
-        
-        // Si estábamos editando, refrescar para ocultar botones
         if(currentCategory) openCategory(currentCategory);
     }
 }
@@ -180,21 +258,26 @@ function openLogin() {
         sessionDiv.classList.add('hidden');
         document.getElementById('loginEmail').value = '';
         document.getElementById('loginPassword').value = '';
+        
+        // Asegurar que abrimos siempre en modo Login
+        if(isRegistering) {
+            isRegistering = true; // Truco para que el toggle lo ponga en false
+            toggleAuthMode();
+        }
+        
     } else {
         formDiv.classList.add('hidden');
         sessionDiv.classList.remove('hidden');
         
-        // --- GESTIÓN DE TÍTULOS DE ROL ---
         const normalizedRole = currentUserRole.toLowerCase().trim();
         let roleTitle = 'Usuario';
         
         if (normalizedRole === 'admin') roleTitle = 'Súper Administrador';
         else if (normalizedRole === 'regente') roleTitle = 'Regente Farmacéutico';
-        else if (normalizedRole === 'medico') roleTitle = 'Personal Médico'; // <--- Nuevo Título
+        else if (normalizedRole === 'medico') roleTitle = 'Personal Médico';
         
         document.getElementById('roleLabel').innerText = roleTitle;
         
-        // Mostrar herramientas de admin SOLO si es admin
         if (normalizedRole === 'admin') {
             adminDiv.classList.remove('hidden');
         } else {
@@ -202,21 +285,16 @@ function openLogin() {
         }
     }
 }
-// --- GESTIÓN DE USUARIOS (PANEL ADMIN) ---
 
-// [CORREGIDO] Hacemos global la función y forzamos el display
+// --- ADMIN PANEL ---
+
 window.openAdminPanel = async function() {
     closeModal('loginModal');
-    
-    // Ocultar otras vistas
     document.getElementById('dashboard').classList.add('hidden');
     document.getElementById('listView').style.display = 'none';
-    
-    // Mostrar Panel Admin
     const panel = document.getElementById('adminPanel');
     panel.classList.remove('hidden');
-    panel.style.display = 'block'; // Forzar visibilidad
-    
+    panel.style.display = 'block'; 
     loadUsersList();
 }
 
@@ -240,7 +318,6 @@ async function loadUsersList() {
             div.className = 'item-card';
             div.style.borderLeftColor = u.rol === 'admin' ? 'var(--primary)' : 'var(--success)';
             
-            // Verificar visualmente si está vencido
             const today = new Date().toISOString().split('T')[0];
             const isExpired = u.vencimiento < today;
             const statusColor = isExpired ? 'red' : 'green';
@@ -259,13 +336,12 @@ async function loadUsersList() {
                 </div>
             `;
             
-            // Llenar formulario al hacer click (excepto en el botón borrar)
             div.addEventListener('click', (e) => {
                 if(e.target.tagName !== 'BUTTON') {
                     document.getElementById('adminUserEmail').value = docSnap.id;
                     document.getElementById('adminUserRole').value = u.rol;
                     document.getElementById('adminUserDate').value = u.vencimiento;
-                    window.scrollTo(0,0); // Subir para ver el form
+                    window.scrollTo(0,0);
                 }
             });
             
@@ -282,39 +358,37 @@ async function saveUserPermission() {
     const role = document.getElementById('adminUserRole').value;
     const date = document.getElementById('adminUserDate').value;
 
-    if(!email || !date) return alert("Falta el correo o la fecha de vencimiento");
+    if(!email || !date) return alert("Falta datos");
 
     const btn = document.getElementById('btnSaveUser');
     btn.innerText = "Guardando...";
     btn.disabled = true;
 
     try {
-        // Guardamos en Firestore usando el email como ID
         await setDoc(doc(db, "usuarios_permitidos", email), {
             rol: role,
             vencimiento: date,
             activo: true
         });
         
-        alert("Permisos guardados correctamente.");
-        document.getElementById('adminUserEmail').value = ''; // Limpiar
-        loadUsersList(); // Recargar lista visual
+        alert("Permisos guardados.");
+        document.getElementById('adminUserEmail').value = '';
+        loadUsersList();
     } catch (e) {
         console.error(e);
-        alert("Error al guardar permiso (Revisa permisos o consola).");
+        alert("Error al guardar.");
     } finally {
         btn.innerText = "Guardar Acceso";
         btn.disabled = false;
     }
 }
 
-// Función global para revocar
 window.revokeAccess = async function(email) {
-    if(confirm(`¿Estás seguro de quitar el acceso a ${email}?`)) {
+    if(confirm(`¿Quitar acceso a ${email}?`)) {
         try {
             await deleteDoc(doc(db, "usuarios_permitidos", email));
             loadUsersList();
-            showToast("Acceso revocado");
+            showToast("Revocado");
         } catch (e) {
             console.error(e);
             alert("Error al eliminar.");
@@ -322,28 +396,17 @@ window.revokeAccess = async function(email) {
     }
 }
 
-// --- CORE FUNCTIONS (Dashboard, Render, Search) ---
+// --- CORE ---
+
 function renderDashboard() {
     const grid = document.getElementById('dashboard');
     grid.innerHTML = '';
 
-    // DEFINIMOS LAS CATEGORÍAS PERMITIDAS PARA MÉDICOS
-    const allowedForMedico = [
-        'pediatria', 
-        'adultos', 
-        'antibioticos', 
-        'presentacion', 
-        'embarazo'
-    ];
+    const allowedForMedico = ['pediatria', 'adultos', 'antibioticos', 'presentacion', 'embarazo'];
 
     categories.forEach(c => {
-        // LÓGICA DE FILTRADO:
-        // Si el rol es 'medico' Y la categoría actual NO está en su lista permitida...
-        // ... entonces hacemos 'return' para saltar esta tarjeta y no pintarla.
-        if (currentUserRole === 'medico' && !allowedForMedico.includes(c.id)) {
-            return; 
-        }
-
+        if (currentUserRole === 'medico' && !allowedForMedico.includes(c.id)) return;
+        
         const card = document.createElement('div');
         card.className = 'category-card';
         card.innerHTML = `<i class="fas ${c.icon}"></i><span>${c.name}</span>`;
@@ -351,14 +414,11 @@ function renderDashboard() {
         grid.appendChild(card);
     });
 
-    // Mostrar Dashboard y ocultar el resto
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('listView').style.display = 'none';
-    
     const adminPanel = document.getElementById('adminPanel');
     adminPanel.classList.add('hidden'); 
     adminPanel.style.display = 'none';
-    
     document.getElementById('searchInput').value = '';
 }
 
@@ -453,6 +513,7 @@ async function globalSearch() {
 }
 
 // --- CRUD ---
+
 function openEditModal(id = null) {
     document.getElementById('editModal').style.display = 'flex';
     if (id) {
@@ -496,7 +557,7 @@ async function saveItem() {
         showToast("Guardado en la Nube");
     } catch (e) {
         console.error("Error guardando: ", e);
-        showToast("Error al guardar (Permisos?)");
+        showToast("Error al guardar.");
     } finally {
         document.getElementById('btnSaveItem').innerText = "Guardar";
         document.getElementById('btnSaveItem').disabled = false;
@@ -504,19 +565,19 @@ async function saveItem() {
 }
 
 async function deleteItem(id) {
-    if (confirm("¿Eliminar este registro permanentemente?")) {
+    if (confirm("¿Eliminar?")) {
         try {
             await deleteDoc(doc(db, "medicamentos", id));
             openCategory(currentCategory);
             showToast("Eliminado");
         } catch (e) {
             console.error("Error borrando: ", e);
-            showToast("Error al eliminar (Permisos?)");
+            showToast("Error al eliminar.");
         }
     }
 }
 
-// --- UTILS & PWA ---
+// --- UTILS ---
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
 function toggleTheme() {
@@ -544,4 +605,3 @@ function registerServiceWorker() {
             .catch(err => console.error(err));
     }
 }
-
