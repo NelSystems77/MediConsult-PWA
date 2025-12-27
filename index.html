@@ -43,7 +43,10 @@
 
     <div class="fab" id="addFab"><i class="fas fa-plus"></i></div>
 
-    <div id="loginForm">
+    <div id="loginModal" class="modal">
+        <div class="modal-content">
+            
+            <div id="loginForm">
                 <h3>Acceso Seguro</h3>
                 <p class="modal-subtitle">Ingresa tus credenciales.</p>
                 
@@ -55,22 +58,25 @@
                     <button class="btn btn-danger modal-close" data-target="loginModal">Cancelar</button>
                 </div>
             </div>
-            </div>
+
             <div id="sessionInfo" class="hidden" style="text-align:center;">
                 <i class="fas fa-user-circle" style="font-size: 3rem; color: var(--primary); margin-bottom: 10px;"></i>
                 <h3 style="margin-bottom: 5px;">Sesión Activa</h3>
                 <p id="roleLabel" style="font-weight:bold; color:var(--success); margin-bottom: 20px;">Rol</p>
+                
                 <div id="adminTools" class="hidden tool-section">
                     <button class="btn btn-primary full-width" id="btnGenCode">
                         <i class="fas fa-key"></i> Generar Código Nuevo
                     </button>
                     <div id="codeDisplay"></div>
                 </div>
+
                 <button class="btn btn-danger full-width" id="btnLogoutAction">
                     <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
                 </button>
                 <button class="btn btn-text full-width modal-close" data-target="loginModal">Volver</button>
             </div>
+
         </div>
     </div>
 
@@ -92,6 +98,4 @@
 
     <script type="module" src="js/app.js"></script>
 </body>
-
 </html>
-
