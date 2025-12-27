@@ -1,9 +1,9 @@
 // js/app.js
 
 // 1. IMPORTAMOS BASE DE DATOS Y AUTH
-import { db, auth } from './firebase-config.js'; // Importamos 'auth'
+import { db, auth } from './firebase-config.js'; 
 import { 
-    collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where 
+    collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, getDoc, setDoc 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 
@@ -47,28 +47,58 @@ function setupEventListeners() {
     document.getElementById('btnLoginAction').addEventListener('click', login);
     document.getElementById('btnLogoutAction').addEventListener('click', logout);
     document.getElementById('btnSaveItem').addEventListener('click', saveItem);
+    
+    // Listener para guardar usuario desde el panel de admin
+    document.getElementById('btnSaveUser').addEventListener('click', saveUserPermission);
 
     document.querySelectorAll('.modal-close').forEach(btn => {
         btn.addEventListener('click', (e) => closeModal(e.target.dataset.target));
     });
 }
 
-// --- AUTENTICACIÓN REAL (FIREBASE) ---
+// --- AUTENTICACIÓN Y SEGURIDAD REAL ---
 
-// 1. Monitorear estado (Mantiene la sesión al recargar)
+// 1. Monitorear estado y verificar permisos en BD
 function monitorAuthState() {
-    onAuthStateChanged(auth, (user) => {
+    onAuthStateChanged(auth, async (user) => {
         if (user) {
-            // Usuario logueado
-            // Lógica simple de roles basada en el email (Para empezar)
-            if (user.email.includes('admin')) {
-                currentUserRole = 'admin';
-            } else if (user.email.includes('regente')) {
-                currentUserRole = 'regente';
-            } else {
-                currentUserRole = 'user';
+            // Usuario logueado en Firebase, ahora verificamos permisos en Firestore
+            try {
+                const userRef = doc(db, "usuarios_permitidos", user.email);
+                const userSnap = await getDoc(userRef);
+
+                if (userSnap.exists()) {
+                    const data = userSnap.data();
+                    
+                    // A. Verificar si está activo manualmente
+                    if (!data.activo) {
+                        alert("Tu usuario ha sido desactivado por el administrador.");
+                        logout();
+                        return;
+                    }
+
+                    // B. Verificar fecha de vencimiento
+                    const today = new Date().toISOString().split('T')[0];
+                    if (data.vencimiento < today) {
+                        alert(`Tu acceso venció el día ${data.vencimiento}. Contacta al administrador.`);
+                        logout();
+                        return;
+                    }
+
+                    // C. Asignar rol real desde la base de datos
+                    currentUserRole = data.rol;
+                    console.log(`Logueado como: ${currentUserRole}`);
+                    updateUILoginState(true);
+
+                } else {
+                    // Usuario autenticado en Firebase pero NO está en la lista blanca
+                    alert("No tienes permisos asignados en este sistema.");
+                    logout(); 
+                }
+            } catch (error) {
+                console.error("Error verificando permisos:", error);
+                logout();
             }
-            updateUILoginState(true);
         } else {
             // Usuario desconectado
             currentUserRole = 'user';
@@ -89,7 +119,7 @@ async function login() {
 
     try {
         await signInWithEmailAndPassword(auth, email, pass);
-        showToast("¡Bienvenido!");
+        showToast("Verificando permisos...");
         closeModal('loginModal');
     } catch (error) {
         console.error(error);
@@ -107,6 +137,8 @@ async function logout() {
         await signOut(auth);
         showToast("Sesión cerrada");
         closeModal('loginModal');
+        // Ocultar panel de admin si estaba abierto
+        document.getElementById('adminPanel').classList.add('hidden');
         showDashboard();
     } catch (error) {
         console.error(error);
@@ -136,25 +168,141 @@ function openLogin() {
     const modal = document.getElementById('loginModal');
     const formDiv = document.getElementById('loginForm');
     const sessionDiv = document.getElementById('sessionInfo');
-    const adminDiv = document.getElementById('adminTools'); // Ya no usamos generador de códigos
+    const adminDiv = document.getElementById('adminTools');
     
     modal.style.display = 'flex';
 
     if (currentUserRole === 'user') {
         formDiv.classList.remove('hidden');
         sessionDiv.classList.add('hidden');
-        // Limpiar campos
         document.getElementById('loginEmail').value = '';
         document.getElementById('loginPassword').value = '';
     } else {
         formDiv.classList.add('hidden');
         sessionDiv.classList.remove('hidden');
         document.getElementById('roleLabel').innerText = currentUserRole === 'admin' ? 'Súper Usuario' : 'Regente';
-        // Ocultamos herramientas viejas de admin por ahora
-        if(adminDiv) adminDiv.classList.add('hidden'); 
+        
+        // Mostrar herramientas de admin SOLO si es admin
+        if(currentUserRole === 'admin') {
+            adminDiv.classList.remove('hidden');
+        } else {
+            adminDiv.classList.add('hidden');
+        }
     }
 }
 
+// --- GESTIÓN DE USUARIOS (PANEL ADMIN) ---
+
+// Hacemos global la función para que el botón del HTML la encuentre
+window.openAdminPanel = async function() {
+    closeModal('loginModal');
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('listView').style.display = 'none';
+    document.getElementById('adminPanel').classList.remove('hidden');
+    loadUsersList();
+}
+
+async function loadUsersList() {
+    const container = document.getElementById('usersListContainer');
+    container.innerHTML = 'Cargando usuarios...';
+    
+    try {
+        const q = query(collection(db, "usuarios_permitidos"));
+        const snapshot = await getDocs(q);
+        
+        container.innerHTML = '';
+        if(snapshot.empty) {
+            container.innerHTML = '<p>No hay usuarios registrados.</p>';
+            return;
+        }
+
+        snapshot.forEach(docSnap => {
+            const u = docSnap.data();
+            const div = document.createElement('div');
+            div.className = 'item-card';
+            div.style.borderLeftColor = u.rol === 'admin' ? 'var(--primary)' : 'var(--success)';
+            
+            // Verificar visualmente si está vencido
+            const today = new Date().toISOString().split('T')[0];
+            const isExpired = u.vencimiento < today;
+            const statusColor = isExpired ? 'red' : 'green';
+            const statusText = isExpired ? '(VENCIDO)' : '';
+
+            div.innerHTML = `
+                <div style="font-weight:bold; display:flex; justify-content:space-between;">
+                    <span>${docSnap.id}</span>
+                    <span style="font-size:0.8em; background:#eee; padding:2px 6px; border-radius:4px;">${u.rol.toUpperCase()}</span>
+                </div>
+                <div style="font-size:0.9rem; margin-top:5px;">
+                    Vence: <span style="color:${statusColor}; font-weight:bold;">${u.vencimiento} ${statusText}</span>
+                </div>
+                <div style="margin-top:10px; text-align:right;">
+                    <button class="btn btn-danger" style="padding:5px 10px; font-size:0.8rem;" onclick="revokeAccess('${docSnap.id}')">Revocar Acceso</button>
+                </div>
+            `;
+            
+            // Llenar formulario al hacer click (excepto en el botón borrar)
+            div.addEventListener('click', (e) => {
+                if(e.target.tagName !== 'BUTTON') {
+                    document.getElementById('adminUserEmail').value = docSnap.id;
+                    document.getElementById('adminUserRole').value = u.rol;
+                    document.getElementById('adminUserDate').value = u.vencimiento;
+                    window.scrollTo(0,0); // Subir para ver el form
+                }
+            });
+            
+            container.appendChild(div);
+        });
+    } catch (e) {
+        console.error("Error cargando usuarios:", e);
+        container.innerHTML = '<p style="color:red">Error cargando lista.</p>';
+    }
+}
+
+async function saveUserPermission() {
+    const email = document.getElementById('adminUserEmail').value.trim();
+    const role = document.getElementById('adminUserRole').value;
+    const date = document.getElementById('adminUserDate').value;
+
+    if(!email || !date) return alert("Falta el correo o la fecha de vencimiento");
+
+    const btn = document.getElementById('btnSaveUser');
+    btn.innerText = "Guardando...";
+    btn.disabled = true;
+
+    try {
+        // Guardamos en Firestore usando el email como ID
+        await setDoc(doc(db, "usuarios_permitidos", email), {
+            rol: role,
+            vencimiento: date,
+            activo: true
+        });
+        
+        alert("Permisos guardados correctamente.");
+        document.getElementById('adminUserEmail').value = ''; // Limpiar
+        loadUsersList(); // Recargar lista visual
+    } catch (e) {
+        console.error(e);
+        alert("Error al guardar permiso (Revisa permisos o consola).");
+    } finally {
+        btn.innerText = "Guardar Acceso";
+        btn.disabled = false;
+    }
+}
+
+// Función global para revocar
+window.revokeAccess = async function(email) {
+    if(confirm(`¿Estás seguro de quitar el acceso a ${email}?`)) {
+        try {
+            await deleteDoc(doc(db, "usuarios_permitidos", email));
+            loadUsersList();
+            showToast("Acceso revocado");
+        } catch (e) {
+            console.error(e);
+            alert("Error al eliminar.");
+        }
+    }
+}
 
 // --- CORE FUNCTIONS (Dashboard, Render, Search) ---
 function renderDashboard() {
@@ -169,6 +317,7 @@ function renderDashboard() {
     });
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('listView').style.display = 'none';
+    document.getElementById('adminPanel').classList.add('hidden'); // Ocultar panel admin si estaba abierto
     document.getElementById('searchInput').value = '';
 }
 
