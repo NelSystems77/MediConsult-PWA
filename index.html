@@ -43,16 +43,18 @@
 
     <div class="fab" id="addFab"><i class="fas fa-plus"></i></div>
 
-    <div id="loginModal" class="modal">
-        <div class="modal-content">
-            <div id="loginForm">
-                <h3>Acceso Administrativo</h3>
-                <p class="modal-subtitle">Introduce el código temporal.</p>
-                <input type="password" id="accessCode" placeholder="Código de acceso">
+    <div id="loginForm">
+                <h3>Acceso Seguro</h3>
+                <p class="modal-subtitle">Ingresa tus credenciales.</p>
+                
+                <input type="email" id="loginEmail" placeholder="Correo electrónico (ej: admin@mediconsult.com)">
+                <input type="password" id="loginPassword" placeholder="Contraseña">
+                
                 <div class="btn-group">
                     <button class="btn btn-primary" id="btnLoginAction">Entrar</button>
                     <button class="btn btn-danger modal-close" data-target="loginModal">Cancelar</button>
                 </div>
+            </div>
             </div>
             <div id="sessionInfo" class="hidden" style="text-align:center;">
                 <i class="fas fa-user-circle" style="font-size: 3rem; color: var(--primary); margin-bottom: 10px;"></i>
@@ -92,3 +94,4 @@
 </body>
 
 </html>
+
