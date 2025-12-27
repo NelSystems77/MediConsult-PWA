@@ -1,17 +1,15 @@
 // js/app.js
 
-// 1. IMPORTAMOS LA BASE DE DATOS
-import { db } from './firebase-config.js';
+// 1. IMPORTAMOS BASE DE DATOS Y AUTH
+import { db, auth } from './firebase-config.js'; // Importamos 'auth'
 import { 
-    collection, 
-    addDoc, 
-    getDocs, 
-    doc, 
-    updateDoc, 
-    deleteDoc, 
-    query, 
-    where 
+    collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { 
+    signInWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged 
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 // --- DATOS Y ESTADO ---
 const categories = [
@@ -28,14 +26,15 @@ const categories = [
     { id: 'colores', name: 'Colores Operativos', icon: 'fa-palette' }
 ];
 
-let currentUserRole = 'user';
+let currentUserRole = 'user'; // user, regente, admin
 let currentCategory = null;
-let localItems = []; // Cache local simple para búsquedas
+let localItems = []; 
 
 // --- INICIALIZACIÓN ---
 document.addEventListener('DOMContentLoaded', () => {
     renderDashboard();
     setupEventListeners();
+    monitorAuthState(); // Iniciamos el monitor de sesión
     registerServiceWorker();
 });
 
@@ -47,7 +46,6 @@ function setupEventListeners() {
     document.getElementById('addFab').addEventListener('click', () => openEditModal());
     document.getElementById('btnLoginAction').addEventListener('click', login);
     document.getElementById('btnLogoutAction').addEventListener('click', logout);
-    document.getElementById('btnGenCode').addEventListener('click', generateCode);
     document.getElementById('btnSaveItem').addEventListener('click', saveItem);
 
     document.querySelectorAll('.modal-close').forEach(btn => {
@@ -55,7 +53,110 @@ function setupEventListeners() {
     });
 }
 
-// --- CORE FUNCTIONS ---
+// --- AUTENTICACIÓN REAL (FIREBASE) ---
+
+// 1. Monitorear estado (Mantiene la sesión al recargar)
+function monitorAuthState() {
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            // Usuario logueado
+            // Lógica simple de roles basada en el email (Para empezar)
+            if (user.email.includes('admin')) {
+                currentUserRole = 'admin';
+            } else if (user.email.includes('regente')) {
+                currentUserRole = 'regente';
+            } else {
+                currentUserRole = 'user';
+            }
+            updateUILoginState(true);
+        } else {
+            // Usuario desconectado
+            currentUserRole = 'user';
+            updateUILoginState(false);
+        }
+    });
+}
+
+// 2. Iniciar Sesión
+async function login() {
+    const email = document.getElementById('loginEmail').value;
+    const pass = document.getElementById('loginPassword').value;
+
+    if(!email || !pass) return showToast("Faltan datos");
+
+    document.getElementById('btnLoginAction').innerText = "Verificando...";
+    document.getElementById('btnLoginAction').disabled = true;
+
+    try {
+        await signInWithEmailAndPassword(auth, email, pass);
+        showToast("¡Bienvenido!");
+        closeModal('loginModal');
+    } catch (error) {
+        console.error(error);
+        if(error.code === 'auth/invalid-credential') showToast("Correo o contraseña incorrectos");
+        else showToast("Error de acceso");
+    } finally {
+        document.getElementById('btnLoginAction').innerText = "Entrar";
+        document.getElementById('btnLoginAction').disabled = false;
+    }
+}
+
+// 3. Cerrar Sesión
+async function logout() {
+    try {
+        await signOut(auth);
+        showToast("Sesión cerrada");
+        closeModal('loginModal');
+        showDashboard();
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+// 4. Actualizar Interfaz según estado
+function updateUILoginState(isLoggedIn) {
+    const loginBtn = document.getElementById('loginBtn');
+    if (isLoggedIn) {
+        loginBtn.style.color = 'var(--success)';
+        loginBtn.innerHTML = '<i class="fas fa-user-check"></i>';
+        
+        // Si estamos viendo una lista, refrescar para mostrar botones de editar
+        if(currentCategory) openCategory(currentCategory);
+    } else {
+        loginBtn.style.color = 'white';
+        loginBtn.innerHTML = '<i class="fas fa-user-lock"></i>';
+        document.getElementById('addFab').style.display = 'none';
+        
+        // Si estábamos editando, refrescar para ocultar botones
+        if(currentCategory) openCategory(currentCategory);
+    }
+}
+
+function openLogin() {
+    const modal = document.getElementById('loginModal');
+    const formDiv = document.getElementById('loginForm');
+    const sessionDiv = document.getElementById('sessionInfo');
+    const adminDiv = document.getElementById('adminTools'); // Ya no usamos generador de códigos
+    
+    modal.style.display = 'flex';
+
+    if (currentUserRole === 'user') {
+        formDiv.classList.remove('hidden');
+        sessionDiv.classList.add('hidden');
+        // Limpiar campos
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginPassword').value = '';
+    } else {
+        formDiv.classList.add('hidden');
+        sessionDiv.classList.remove('hidden');
+        document.getElementById('roleLabel').innerText = currentUserRole === 'admin' ? 'Súper Usuario' : 'Regente';
+        // Ocultamos herramientas viejas de admin por ahora
+        if(adminDiv) adminDiv.classList.add('hidden'); 
+    }
+}
+
+
+// --- CORE FUNCTIONS (Dashboard, Render, Search) ---
 function renderDashboard() {
     const grid = document.getElementById('dashboard');
     grid.innerHTML = '';
@@ -71,7 +172,6 @@ function renderDashboard() {
     document.getElementById('searchInput').value = '';
 }
 
-// --- LECTURA DESDE FIREBASE ---
 async function openCategory(catId) {
     currentCategory = catId;
     const cat = categories.find(c => c.id === catId);
@@ -79,23 +179,18 @@ async function openCategory(catId) {
     document.getElementById('dashboard').classList.add('hidden');
     document.getElementById('listView').style.display = 'block';
     
-    // Limpiar contenedor
     const container = document.getElementById('itemsContainer');
     container.innerHTML = '<p style="text-align:center; margin-top:20px;">Cargando datos...</p>';
 
     try {
-        // Consulta a Firebase: "Dame documentos donde la categoria sea X"
         const q = query(collection(db, "medicamentos"), where("cat", "==", catId));
         const querySnapshot = await getDocs(q);
-        
-        localItems = []; // Limpiamos cache local
+        localItems = []; 
         querySnapshot.forEach((doc) => {
             localItems.push({ id: doc.id, ...doc.data() });
         });
-
         document.getElementById('categoryTitle').innerText = cat.name;
         renderItems(localItems);
-
     } catch (error) {
         console.error("Error cargando datos: ", error);
         container.innerHTML = '<p style="text-align:center; color:red;">Error de conexión</p>';
@@ -110,9 +205,7 @@ function renderItems(items) {
     items.forEach(item => {
         const div = document.createElement('div');
         div.className = 'item-card';
-        
-        let html = `<div class="item-title">${item.title}</div><div class="item-content">${item.content}</div>`;
-        div.innerHTML = html;
+        div.innerHTML = `<div class="item-title">${item.title}</div><div class="item-content">${item.content}</div>`;
 
         if (currentUserRole === 'admin' || currentUserRole === 'regente') {
             const controls = document.createElement('div');
@@ -123,7 +216,6 @@ function renderItems(items) {
             btnEdit.style.padding = '5px 10px';
             btnEdit.innerHTML = '<i class="fas fa-edit"></i>';
             btnEdit.onclick = () => openEditModal(item.id);
-
             controls.appendChild(btnEdit);
 
             if (currentUserRole === 'admin') {
@@ -149,23 +241,15 @@ function showDashboard() {
 
 async function globalSearch() {
     const queryText = document.getElementById('searchInput').value.toLowerCase();
-    
-    // NOTA: Firebase no tiene búsqueda nativa de "texto completo" gratuita fácil.
-    // Estrategia: Si hay texto, buscamos en TODOS los documentos (o usamos cache si ya cargamos).
-    // Para esta versión PWA simple, descargaremos todo si busca algo (Cuidado con bases de datos gigantes)
-    
     if (!queryText) {
         if (currentCategory) openCategory(currentCategory);
         else renderDashboard();
         return;
     }
-
     document.getElementById('dashboard').classList.add('hidden');
     document.getElementById('listView').style.display = 'block';
     document.getElementById('categoryTitle').innerText = "Buscando...";
 
-    // Traer TODO para buscar en memoria (Solución rápida para demos)
-    // En producción se usaría Algolia o ElasticSearch
     const querySnapshot = await getDocs(collection(db, "medicamentos"));
     const allDocs = [];
     querySnapshot.forEach((doc) => allDocs.push({ id: doc.id, ...doc.data() }));
@@ -174,82 +258,11 @@ async function globalSearch() {
         item.title.toLowerCase().includes(queryText) || 
         item.content.toLowerCase().includes(queryText)
     );
-    
     document.getElementById('categoryTitle').innerText = "Resultados de búsqueda";
     renderItems(results);
 }
 
-// --- AUTH (Simulada, igual que antes) ---
-function validateCode(code) {
-    if (code === "1234") return 'admin';
-    if (code === "5678") return 'regente';
-    try {
-        const decoded = atob(code);
-        const [role, date] = decoded.split('|');
-        const today = new Date().toISOString().split('T')[0];
-        if (date === today) return role;
-    } catch (e) {}
-    return null;
-}
-
-function login() {
-    const code = document.getElementById('accessCode').value;
-    const role = validateCode(code);
-    if (role) {
-        currentUserRole = role;
-        showToast(`Bienvenido ${role.toUpperCase()}`);
-        document.getElementById('accessCode').value = '';
-        document.getElementById('loginBtn').style.color = 'var(--success)';
-        document.getElementById('loginBtn').innerHTML = '<i class="fas fa-user-check"></i>';
-        closeModal('loginModal');
-        if (currentCategory) openCategory(currentCategory); // Recargar para ver botones
-    } else {
-        showToast("Código inválido");
-    }
-}
-
-function logout() {
-    currentUserRole = 'user';
-    document.getElementById('loginBtn').style.color = 'white';
-    document.getElementById('loginBtn').innerHTML = '<i class="fas fa-user-lock"></i>';
-    document.getElementById('addFab').style.display = 'none';
-    closeModal('loginModal');
-    showDashboard();
-    showToast("Sesión cerrada");
-}
-
-function openLogin() {
-    const modal = document.getElementById('loginModal');
-    const formDiv = document.getElementById('loginForm');
-    const sessionDiv = document.getElementById('sessionInfo');
-    const adminDiv = document.getElementById('adminTools');
-    
-    modal.style.display = 'flex';
-
-    if (currentUserRole === 'user') {
-        formDiv.classList.remove('hidden');
-        sessionDiv.classList.add('hidden');
-    } else {
-        formDiv.classList.add('hidden');
-        sessionDiv.classList.remove('hidden');
-        document.getElementById('roleLabel').innerText = currentUserRole === 'admin' ? 'Súper Usuario' : 'Regente';
-        if (currentUserRole === 'admin') {
-            adminDiv.classList.remove('hidden');
-            document.getElementById('codeDisplay').innerText = '';
-        } else {
-            adminDiv.classList.add('hidden');
-        }
-    }
-}
-
-function generateCode() {
-    const today = new Date().toISOString().split('T')[0];
-    const token = btoa(`regente|${today}`);
-    document.getElementById('codeDisplay').innerText = token;
-    showToast("Código temporal generado");
-}
-
-// --- CRUD CON FIREBASE ---
+// --- CRUD ---
 function openEditModal(id = null) {
     document.getElementById('editModal').style.display = 'flex';
     if (id) {
@@ -281,29 +294,19 @@ async function saveItem() {
 
     try {
         if (id) {
-            // EDITAR en Firebase
             const itemRef = doc(db, "medicamentos", id);
-            await updateDoc(itemRef, {
-                title: title,
-                content: content
-            });
+            await updateDoc(itemRef, { title: title, content: content });
         } else {
-            // CREAR en Firebase
             await addDoc(collection(db, "medicamentos"), {
-                cat: cat,
-                title: title,
-                content: content,
-                createdAt: new Date()
+                cat: cat, title: title, content: content, createdAt: new Date()
             });
         }
-        
         closeModal('editModal');
-        openCategory(cat); // Recargar lista
+        openCategory(cat);
         showToast("Guardado en la Nube");
-
     } catch (e) {
         console.error("Error guardando: ", e);
-        showToast("Error al guardar");
+        showToast("Error al guardar (Permisos?)");
     } finally {
         document.getElementById('btnSaveItem').innerText = "Guardar";
         document.getElementById('btnSaveItem').disabled = false;
@@ -314,19 +317,17 @@ async function deleteItem(id) {
     if (confirm("¿Eliminar este registro permanentemente?")) {
         try {
             await deleteDoc(doc(db, "medicamentos", id));
-            openCategory(currentCategory); // Recargar
+            openCategory(currentCategory);
             showToast("Eliminado");
         } catch (e) {
             console.error("Error borrando: ", e);
-            showToast("Error al eliminar");
+            showToast("Error al eliminar (Permisos?)");
         }
     }
 }
 
 // --- UTILS & PWA ---
-function closeModal(id) {
-    document.getElementById(id).style.display = 'none';
-}
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
 function toggleTheme() {
     const body = document.body;
@@ -350,45 +351,6 @@ function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js')
             .then(() => console.log('SW Registrado'))
-            .catch(err => console.error('Error SW:', err));
+            .catch(err => console.error(err));
     }
 }
-
-// --- FUNCIÓN TEMPORAL PARA POBLAR BASE DE DATOS ---
-// Ejecuta poblarBD() en la consola del navegador para activarla.
-async function uploadInitialData() {
-    if(!confirm("¿Estás seguro de subir todos los datos iniciales a Firebase? Esto puede crear duplicados si ya existen.")) return;
-    
-    console.log("Iniciando subida...");
-    const initialData = [
-        { cat: 'pediatria', title: 'Teofilina (Jarabe)', content: '• 1 año: 5–8 mg/kg/día\n• 1–5 años: 12–15 mg/kg/día\n• 5–15 años: 10–20 mg/kg/día\n• Frecuencia: cada 6 u 8 horas' },
-        { cat: 'presentacion', title: 'Digoxina (Gotas)', content: '• 1 gota = 0,016 mg\n• 1 gota = 10,6 mcg\n• Frasco: 450 gotas' },
-        { cat: 'adultos', title: 'Vareniclina (Champix)', content: '• Días 1–3: 1 tableta diaria\n• A partir día 4: 1 tableta mañana y noche\n• Duración: hasta completar tratamiento' },
-        { cat: 'embarazo', title: 'Permitidos y No Rec.', content: '✔️ Permitidos:\n• Leche de magnesia\n• Fibra\n\n❌ No recomendados:\n• Petrolato' },
-        { cat: 'antibioticos', title: 'Nitrofurantoína', content: '• 1 mes:\n• Tratamiento: 1.25–1.75 mg/kg c/6h\n• Profilaxis: 1–2 mg/kg dosis nocturna' },
-        { cat: 'compra', title: 'Juanito del Valle - Isotretinoína', content: '• Cédula: XXXXXXXX\n• Dosis: 20 mg/día\n• Solicitud: Agosto\n• Inicio: Diciembre\n• Dr. Mata Lozano / Dr. Thorpe' },
-        { cat: 'stock', title: 'Códigos EBAIS', content: '• 221101: Divino Pastor\n\nDerivar Inyectables:\n• 26 – Stock EBAIS Guadalupe Este' },
-        { cat: 'siglas', title: 'EBAIS Divino Pastor', content: '• Código sector: 221101\n• Sigla en receta: 01' },
-        { cat: 'legal', title: 'Ley 7739 – Código Niñez', content: 'Cubre:\n• Menores de edad\n• Mujeres embarazadas' },
-        { cat: 'ancianos', title: 'Hogar: Ángeles de Oro', content: '• Entrega recetas: Miércoles\n• Retiro recetas: Viernes' },
-        { cat: 'colores', title: 'Semanal', content: '• Lunes: Naranja\n• EBAIS: Celeste' }
-    ];
-
-    try {
-        for (const item of initialData) {
-            await addDoc(collection(db, "medicamentos"), {
-                ...item,
-                createdAt: new Date()
-            });
-            console.log(`Subido: ${item.title}`);
-        }
-        alert("¡Base de datos poblada con éxito!");
-        location.reload(); 
-    } catch (e) {
-        console.error("Error subiendo datos:", e);
-        alert("Hubo un error. Revisa la consola.");
-    }
-}
-
-// Exponemos la función a la ventana global
-window.poblarBD = uploadInitialData;
