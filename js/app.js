@@ -353,3 +353,42 @@ function registerServiceWorker() {
             .catch(err => console.error('Error SW:', err));
     }
 }
+
+// --- FUNCIÓN TEMPORAL PARA POBLAR BASE DE DATOS ---
+// Ejecuta poblarBD() en la consola del navegador para activarla.
+async function uploadInitialData() {
+    if(!confirm("¿Estás seguro de subir todos los datos iniciales a Firebase? Esto puede crear duplicados si ya existen.")) return;
+    
+    console.log("Iniciando subida...");
+    const initialData = [
+        { cat: 'pediatria', title: 'Teofilina (Jarabe)', content: '• 1 año: 5–8 mg/kg/día\n• 1–5 años: 12–15 mg/kg/día\n• 5–15 años: 10–20 mg/kg/día\n• Frecuencia: cada 6 u 8 horas' },
+        { cat: 'presentacion', title: 'Digoxina (Gotas)', content: '• 1 gota = 0,016 mg\n• 1 gota = 10,6 mcg\n• Frasco: 450 gotas' },
+        { cat: 'adultos', title: 'Vareniclina (Champix)', content: '• Días 1–3: 1 tableta diaria\n• A partir día 4: 1 tableta mañana y noche\n• Duración: hasta completar tratamiento' },
+        { cat: 'embarazo', title: 'Permitidos y No Rec.', content: '✔️ Permitidos:\n• Leche de magnesia\n• Fibra\n\n❌ No recomendados:\n• Petrolato' },
+        { cat: 'antibioticos', title: 'Nitrofurantoína', content: '• 1 mes:\n• Tratamiento: 1.25–1.75 mg/kg c/6h\n• Profilaxis: 1–2 mg/kg dosis nocturna' },
+        { cat: 'compra', title: 'Juanito del Valle - Isotretinoína', content: '• Cédula: XXXXXXXX\n• Dosis: 20 mg/día\n• Solicitud: Agosto\n• Inicio: Diciembre\n• Dr. Mata Lozano / Dr. Thorpe' },
+        { cat: 'stock', title: 'Códigos EBAIS', content: '• 221101: Divino Pastor\n\nDerivar Inyectables:\n• 26 – Stock EBAIS Guadalupe Este' },
+        { cat: 'siglas', title: 'EBAIS Divino Pastor', content: '• Código sector: 221101\n• Sigla en receta: 01' },
+        { cat: 'legal', title: 'Ley 7739 – Código Niñez', content: 'Cubre:\n• Menores de edad\n• Mujeres embarazadas' },
+        { cat: 'ancianos', title: 'Hogar: Ángeles de Oro', content: '• Entrega recetas: Miércoles\n• Retiro recetas: Viernes' },
+        { cat: 'colores', title: 'Semanal', content: '• Lunes: Naranja\n• EBAIS: Celeste' }
+    ];
+
+    try {
+        for (const item of initialData) {
+            await addDoc(collection(db, "medicamentos"), {
+                ...item,
+                createdAt: new Date()
+            });
+            console.log(`Subido: ${item.title}`);
+        }
+        alert("¡Base de datos poblada con éxito!");
+        location.reload(); 
+    } catch (e) {
+        console.error("Error subiendo datos:", e);
+        alert("Hubo un error. Revisa la consola.");
+    }
+}
+
+// Exponemos la función a la ventana global
+window.poblarBD = uploadInitialData;
