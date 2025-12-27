@@ -145,12 +145,14 @@ function monitorAuthState() {
     onAuthStateChanged(auth, async (user) => {
         if (user) {
             try {
+                // 1. Buscamos permisos en Firestore
                 const userRef = doc(db, "usuarios_permitidos", user.email);
                 const userSnap = await getDoc(userRef);
 
                 if (userSnap.exists()) {
                     const data = userSnap.data();
                     
+                    // Validaciones de seguridad
                     if (!data.activo) {
                         alert("Tu usuario ha sido desactivado.");
                         logout();
@@ -164,14 +166,19 @@ function monitorAuthState() {
                         return;
                     }
 
+                    // Asignar rol
                     currentUserRole = data.rol.toLowerCase().trim();
                     console.log(`Logueado como: ${currentUserRole}`);
+                    
+                    // Actualizar botones del menú
                     updateUILoginState(true);
+                    
+                    // --- ¡AQUÍ ESTÁ LA SOLUCIÓN! ---
+                    // Obligamos a repintar las tarjetas ahora que sabemos el rol
+                    renderDashboard(); 
 
                 } else {
-                    // Si llegamos aquí es porque alguien se registró y se le borró la cuenta,
-                    // o intentó entrar y no está en lista.
-                    // (El registerUser ya maneja la eliminación, pero esto es doble seguridad)
+                    // Usuario no autorizado en Firestore
                     if(auth.currentUser) await deleteUser(auth.currentUser).catch(e => console.log(e));
                     alert("No tienes permisos.");
                     logout(); 
@@ -181,8 +188,12 @@ function monitorAuthState() {
                 logout();
             }
         } else {
+            // Usuario desconectado
             currentUserRole = 'user';
             updateUILoginState(false);
+            
+            // También repintamos al salir para volver a mostrar todo (o lo default)
+            renderDashboard(); 
         }
     });
 }
@@ -605,3 +616,4 @@ function registerServiceWorker() {
             .catch(err => console.error(err));
     }
 }
+
