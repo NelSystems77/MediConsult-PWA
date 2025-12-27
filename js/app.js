@@ -7,10 +7,10 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 
-    createUserWithEmailAndPassword, // <--- NUEVO PARA REGISTRO
+    createUserWithEmailAndPassword, 
     signOut, 
     onAuthStateChanged,
-    deleteUser // <--- NUEVO PARA SEGURIDAD
+    deleteUser 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 // --- DATOS Y ESTADO ---
@@ -28,10 +28,10 @@ const categories = [
     { id: 'colores', name: 'Colores Operativos', icon: 'fa-palette' }
 ];
 
-let currentUserRole = 'user'; // user, regente, admin
+let currentUserRole = 'user'; // user, regente, admin, medico
 let currentCategory = null;
 let localItems = []; 
-let isRegistering = false; // Estado para saber si es Login o Registro
+let isRegistering = false; 
 
 // --- INICIALIZACIÓN ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -48,11 +48,12 @@ function setupEventListeners() {
     document.getElementById('backBtn').addEventListener('click', showDashboard);
     document.getElementById('addFab').addEventListener('click', () => openEditModal());
     
-    // Auth Listeners Actualizados
+    // Auth Listeners
     document.getElementById('btnLoginAction').addEventListener('click', handleAuthAction);
     document.getElementById('btnLogoutAction').addEventListener('click', logout);
     document.getElementById('toggleRegister').addEventListener('click', toggleAuthMode);
     
+    // Admin & CRUD Listeners
     document.getElementById('btnSaveItem').addEventListener('click', saveItem);
     document.getElementById('btnSaveUser').addEventListener('click', saveUserPermission);
 
@@ -61,7 +62,7 @@ function setupEventListeners() {
     });
 }
 
-// --- LÓGICA DE REGISTRO / LOGIN (NUEVO) ---
+// --- LÓGICA DE REGISTRO / LOGIN ---
 
 function toggleAuthMode(e) {
     if(e) e.preventDefault();
@@ -105,17 +106,15 @@ async function registerUser() {
     btn.disabled = true;
 
     try {
-        // 1. Crear usuario en Auth
         const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
         const user = userCredential.user;
 
-        // 2. Verificar si está en lista blanca
+        // Verificar si está en lista blanca
         const userRef = doc(db, "usuarios_permitidos", user.email);
         const userSnap = await getDoc(userRef);
 
         if (userSnap.exists()) {
             showToast("¡Cuenta creada con éxito!");
-            // monitorAuthState hará el login automático
             closeModal('loginModal');
         } else {
             // INTRUSO: Borrar cuenta y bloquear
@@ -128,8 +127,8 @@ async function registerUser() {
         console.error(error);
         if (error.code === 'auth/email-already-in-use') {
             showToast("Este correo ya existe. Inicia sesión.");
-            isRegistering = true; // Forzar estado para que el toggle funcione bien
-            toggleAuthMode(); // Volver a login
+            isRegistering = true; 
+            toggleAuthMode(); 
         } else {
             showToast("Error: " + error.message);
         }
@@ -145,14 +144,12 @@ function monitorAuthState() {
     onAuthStateChanged(auth, async (user) => {
         if (user) {
             try {
-                // 1. Buscamos permisos en Firestore
                 const userRef = doc(db, "usuarios_permitidos", user.email);
                 const userSnap = await getDoc(userRef);
 
                 if (userSnap.exists()) {
                     const data = userSnap.data();
                     
-                    // Validaciones de seguridad
                     if (!data.activo) {
                         alert("Tu usuario ha sido desactivado.");
                         logout();
@@ -166,19 +163,15 @@ function monitorAuthState() {
                         return;
                     }
 
-                    // Asignar rol
                     currentUserRole = data.rol.toLowerCase().trim();
                     console.log(`Logueado como: ${currentUserRole}`);
                     
-                    // Actualizar botones del menú
                     updateUILoginState(true);
                     
-                    // --- ¡AQUÍ ESTÁ LA SOLUCIÓN! ---
-                    // Obligamos a repintar las tarjetas ahora que sabemos el rol
+                    // RE-RENDERIZAR PARA APLICAR FILTROS VISUALES (Médico vs Admin)
                     renderDashboard(); 
 
                 } else {
-                    // Usuario no autorizado en Firestore
                     if(auth.currentUser) await deleteUser(auth.currentUser).catch(e => console.log(e));
                     alert("No tienes permisos.");
                     logout(); 
@@ -188,11 +181,8 @@ function monitorAuthState() {
                 logout();
             }
         } else {
-            // Usuario desconectado
             currentUserRole = 'user';
             updateUILoginState(false);
-            
-            // También repintamos al salir para volver a mostrar todo (o lo default)
             renderDashboard(); 
         }
     });
@@ -226,11 +216,11 @@ async function logout() {
         await signOut(auth);
         showToast("Sesión cerrada");
         closeModal('loginModal');
+        
         const adminPanel = document.getElementById('adminPanel');
         adminPanel.classList.add('hidden');
         adminPanel.style.display = 'none';
         
-        // Resetear formulario a modo Login
         if(isRegistering) {
             isRegistering = true; 
             toggleAuthMode();
@@ -270,9 +260,8 @@ function openLogin() {
         document.getElementById('loginEmail').value = '';
         document.getElementById('loginPassword').value = '';
         
-        // Asegurar que abrimos siempre en modo Login
         if(isRegistering) {
-            isRegistering = true; // Truco para que el toggle lo ponga en false
+            isRegistering = true; 
             toggleAuthMode();
         }
         
@@ -416,6 +405,7 @@ function renderDashboard() {
     const allowedForMedico = ['pediatria', 'adultos', 'antibioticos', 'presentacion', 'embarazo'];
 
     categories.forEach(c => {
+        // FILTRO DE MÉDICO
         if (currentUserRole === 'medico' && !allowedForMedico.includes(c.id)) return;
         
         const card = document.createElement('div');
@@ -463,12 +453,17 @@ function renderItems(items) {
     container.innerHTML = '';
     if (items.length === 0) container.innerHTML = '<p style="text-align:center; color:var(--text-sec)">No hay información.</p>';
 
+    // --- CORRECCIÓN DE SEGURIDAD PARA EDICIÓN ---
+    // Solo Admin y Regente pueden editar. El Médico NO entra en esta variable.
+    const canEdit = (currentUserRole === 'admin' || currentUserRole === 'regente');
+
     items.forEach(item => {
         const div = document.createElement('div');
         div.className = 'item-card';
         div.innerHTML = `<div class="item-title">${item.title}</div><div class="item-content">${item.content}</div>`;
 
-        if (currentUserRole === 'admin' || currentUserRole === 'regente') {
+        // Solo mostrar botones si canEdit es true
+        if (canEdit) {
             const controls = document.createElement('div');
             controls.className = 'edit-controls';
             
@@ -492,7 +487,13 @@ function renderItems(items) {
         container.appendChild(div);
     });
 
-    document.getElementById('addFab').style.display = (currentUserRole !== 'user' && currentCategory) ? 'flex' : 'none';
+    // Controlar visibilidad del Botón Flotante (+)
+    const fab = document.getElementById('addFab');
+    if (canEdit && currentCategory) {
+        fab.style.display = 'flex';
+    } else {
+        fab.style.display = 'none';
+    }
 }
 
 function showDashboard() {
@@ -616,4 +617,3 @@ function registerServiceWorker() {
             .catch(err => console.error(err));
     }
 }
-
