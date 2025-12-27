@@ -68,14 +68,20 @@
         <div class="modal-content">
             
             <div id="loginForm">
-                <h3>Acceso Seguro</h3>
-                <p class="modal-subtitle">Ingresa tus credenciales.</p>
-                <input type="email" id="loginEmail" placeholder="Correo electrónico (ej: admin@mediconsult.com)">
+                <h3 id="formTitle">Acceso Seguro</h3> <p class="modal-subtitle">Ingresa tus credenciales.</p>
+                
+                <input type="email" id="loginEmail" placeholder="Correo electrónico">
                 <input type="password" id="loginPassword" placeholder="Contraseña">
+                
                 <div class="btn-group">
                     <button class="btn btn-primary" id="btnLoginAction">Entrar</button>
                     <button class="btn btn-danger modal-close" data-target="loginModal">Cancelar</button>
                 </div>
+
+                <p style="margin-top:15px; font-size:0.9rem; text-align:center;">
+                    <span id="msgToggle">¿Es tu primera vez?</span> 
+                    <a href="#" id="toggleRegister" style="color:var(--primary); font-weight:bold;">Crear mi clave</a>
+                </p>
             </div>
 
             <div id="sessionInfo" class="hidden" style="text-align:center;">
@@ -117,6 +123,7 @@
     <script type="module" src="js/app.js"></script>
 </body>
 </html>
+
 
 
 
