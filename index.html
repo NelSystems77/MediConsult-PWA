@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediConsult PWA</title>
+    
+    <meta name="theme-color" content="#007bff">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+    <header>
+        <div class="header-title"><i class="fas fa-stethoscope"></i> MediConsult</div>
+        <div style="display:flex; gap:10px;">
+            <button class="theme-toggle" id="themeToggle"><i class="fas fa-moon"></i></button>
+            <button class="login-btn" id="loginBtn"><i class="fas fa-user-lock"></i></button>
+        </div>
+    </header>
+
+    <div class="search-container">
+        <div class="search-box">
+            <i class="fas fa-search" style="color:var(--text-sec)"></i>
+            <input type="text" id="searchInput" placeholder="Buscar medicamento, dosis, código...">
+        </div>
+    </div>
+
+    <div id="dashboard" class="grid-container"></div>
+    
+    <div id="listView" class="list-container">
+        <div class="back-btn" id="backBtn"><i class="fas fa-arrow-left"></i> Volver</div>
+        <h2 id="categoryTitle" style="margin-bottom: 1rem;">Categoria</h2>
+        <div id="itemsContainer"></div>
+    </div>
+
+    <div class="fab" id="addFab"><i class="fas fa-plus"></i></div>
+
+    <div id="loginModal" class="modal">
+        <div class="modal-content">
+            <div id="loginForm">
+                <h3>Acceso Administrativo</h3>
+                <p class="modal-subtitle">Introduce el código temporal.</p>
+                <input type="password" id="accessCode" placeholder="Código de acceso">
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="btnLoginAction">Entrar</button>
+                    <button class="btn btn-danger modal-close" data-target="loginModal">Cancelar</button>
+                </div>
+            </div>
+            <div id="sessionInfo" class="hidden" style="text-align:center;">
+                <i class="fas fa-user-circle" style="font-size: 3rem; color: var(--primary); margin-bottom: 10px;"></i>
+                <h3 style="margin-bottom: 5px;">Sesión Activa</h3>
+                <p id="roleLabel" style="font-weight:bold; color:var(--success); margin-bottom: 20px;">Rol</p>
+                <div id="adminTools" class="hidden tool-section">
+                    <button class="btn btn-primary full-width" id="btnGenCode">
+                        <i class="fas fa-key"></i> Generar Código Nuevo
+                    </button>
+                    <div id="codeDisplay"></div>
+                </div>
+                <button class="btn btn-danger full-width" id="btnLogoutAction">
+                    <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
+                </button>
+                <button class="btn btn-text full-width modal-close" data-target="loginModal">Volver</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h3 id="modalTitle">Editar Información</h3>
+            <input type="hidden" id="editId">
+            <input type="hidden" id="editCategory">
+            <input type="text" id="editTitle" placeholder="Título (Ej. Nombre Medicamento)">
+            <textarea id="editContent" rows="6" placeholder="Detalles"></textarea>
+            <div class="btn-group">
+                <button class="btn btn-primary" id="btnSaveItem">Guardar</button>
+                <button class="btn btn-danger modal-close" data-target="editModal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast">Notificación</div>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
