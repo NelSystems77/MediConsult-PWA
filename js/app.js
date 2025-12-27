@@ -183,17 +183,25 @@ function openLogin() {
     } else {
         formDiv.classList.add('hidden');
         sessionDiv.classList.remove('hidden');
-        document.getElementById('roleLabel').innerText = currentUserRole === 'admin' ? 'Súper Usuario' : 'Regente';
+        
+        // --- GESTIÓN DE TÍTULOS DE ROL ---
+        const normalizedRole = currentUserRole.toLowerCase().trim();
+        let roleTitle = 'Usuario';
+        
+        if (normalizedRole === 'admin') roleTitle = 'Súper Administrador';
+        else if (normalizedRole === 'regente') roleTitle = 'Regente Farmacéutico';
+        else if (normalizedRole === 'medico') roleTitle = 'Personal Médico'; // <--- Nuevo Título
+        
+        document.getElementById('roleLabel').innerText = roleTitle;
         
         // Mostrar herramientas de admin SOLO si es admin
-        if(currentUserRole === 'admin') {
+        if (normalizedRole === 'admin') {
             adminDiv.classList.remove('hidden');
         } else {
             adminDiv.classList.add('hidden');
         }
     }
 }
-
 // --- GESTIÓN DE USUARIOS (PANEL ADMIN) ---
 
 // [CORREGIDO] Hacemos global la función y forzamos el display
@@ -318,21 +326,38 @@ window.revokeAccess = async function(email) {
 function renderDashboard() {
     const grid = document.getElementById('dashboard');
     grid.innerHTML = '';
+
+    // DEFINIMOS LAS CATEGORÍAS PERMITIDAS PARA MÉDICOS
+    const allowedForMedico = [
+        'pediatria', 
+        'adultos', 
+        'antibioticos', 
+        'presentacion', 
+        'embarazo'
+    ];
+
     categories.forEach(c => {
+        // LÓGICA DE FILTRADO:
+        // Si el rol es 'medico' Y la categoría actual NO está en su lista permitida...
+        // ... entonces hacemos 'return' para saltar esta tarjeta y no pintarla.
+        if (currentUserRole === 'medico' && !allowedForMedico.includes(c.id)) {
+            return; 
+        }
+
         const card = document.createElement('div');
         card.className = 'category-card';
         card.innerHTML = `<i class="fas ${c.icon}"></i><span>${c.name}</span>`;
         card.addEventListener('click', () => openCategory(c.id));
         grid.appendChild(card);
     });
+
+    // Mostrar Dashboard y ocultar el resto
     document.getElementById('dashboard').classList.remove('hidden');
-    
-    // [CORREGIDO] Asegurar que ocultamos el resto
     document.getElementById('listView').style.display = 'none';
     
     const adminPanel = document.getElementById('adminPanel');
     adminPanel.classList.add('hidden'); 
-    adminPanel.style.display = 'none'; // Forzar ocultado
+    adminPanel.style.display = 'none';
     
     document.getElementById('searchInput').value = '';
 }
@@ -519,3 +544,4 @@ function registerServiceWorker() {
             .catch(err => console.error(err));
     }
 }
+
