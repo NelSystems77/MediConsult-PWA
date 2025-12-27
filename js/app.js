@@ -85,8 +85,8 @@ function monitorAuthState() {
                         return;
                     }
 
-                    // C. Asignar rol real desde la base de datos
-                    currentUserRole = data.rol;
+                    // C. Asignar rol real (Normalizado a minúsculas para evitar errores)
+                    currentUserRole = data.rol.toLowerCase().trim();
                     console.log(`Logueado como: ${currentUserRole}`);
                     updateUILoginState(true);
 
@@ -138,7 +138,10 @@ async function logout() {
         showToast("Sesión cerrada");
         closeModal('loginModal');
         // Ocultar panel de admin si estaba abierto
-        document.getElementById('adminPanel').classList.add('hidden');
+        const adminPanel = document.getElementById('adminPanel');
+        adminPanel.classList.add('hidden');
+        adminPanel.style.display = 'none';
+        
         showDashboard();
     } catch (error) {
         console.error(error);
@@ -193,12 +196,19 @@ function openLogin() {
 
 // --- GESTIÓN DE USUARIOS (PANEL ADMIN) ---
 
-// Hacemos global la función para que el botón del HTML la encuentre
+// [CORREGIDO] Hacemos global la función y forzamos el display
 window.openAdminPanel = async function() {
     closeModal('loginModal');
+    
+    // Ocultar otras vistas
     document.getElementById('dashboard').classList.add('hidden');
     document.getElementById('listView').style.display = 'none';
-    document.getElementById('adminPanel').classList.remove('hidden');
+    
+    // Mostrar Panel Admin
+    const panel = document.getElementById('adminPanel');
+    panel.classList.remove('hidden');
+    panel.style.display = 'block'; // Forzar visibilidad
+    
     loadUsersList();
 }
 
@@ -316,8 +326,14 @@ function renderDashboard() {
         grid.appendChild(card);
     });
     document.getElementById('dashboard').classList.remove('hidden');
+    
+    // [CORREGIDO] Asegurar que ocultamos el resto
     document.getElementById('listView').style.display = 'none';
-    document.getElementById('adminPanel').classList.add('hidden'); // Ocultar panel admin si estaba abierto
+    
+    const adminPanel = document.getElementById('adminPanel');
+    adminPanel.classList.add('hidden'); 
+    adminPanel.style.display = 'none'; // Forzar ocultado
+    
     document.getElementById('searchInput').value = '';
 }
 
